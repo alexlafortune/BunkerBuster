@@ -6,19 +6,35 @@ public class FluidField
 {
     private int width;
     private int height;
-    private Dictionary<int, int> particleField;
+    private List<int> nodes;
+    private HashSet<int> changedNodes;
+    private List<int> sourceNodes;
+    private List<int> sinkNodes;
     private bool reverseStep;   // step in both directions to avoid biasing one direction
 
     public FluidField(int width, int height)
     {
         this.width = width;
         this.height = height;
-        particleField = new Dictionary<int, int>();
+        nodes = new List<int>();
 
         for (int i = 0; i < width * height; ++i)
-            particleField.Add(i, ParticleType.EMPTY);
+            nodes.Add(ParticleType.EMPTY);
 
+        changedNodes = new HashSet<int>();
+        sourceNodes = new List<int>();
+        sinkNodes = new List<int>();
         reverseStep = false;
+    }
+
+    public FluidField(Texture2D texture) : this(texture.width, texture.height)
+    {
+        Init(texture);
+    }
+
+    public void AddSourceNode(int x, int y)
+    {
+        sourceNodes.Add(GetAddress(x, y));
     }
 
     private int GetAddress(int x, int y)
@@ -33,25 +49,7 @@ public class FluidField
 
     private int GetParticleType(int x, int y)
     {
-        return IsOutOfBounds(x, y) ? ParticleType.SOLID : particleField[GetAddress(x, y)];
-    }
-
-    public void Init()
-    {
-        Vector2Int centre = new Vector2Int(width / 2, height / 2);
-
-        for (int x = 0; x < width; ++x)
-        {
-            for (int y = 0; y < height; ++y)
-            {
-                Vector2Int v = new Vector2Int(x, y);
-
-                if ((v - centre).magnitude < 20)
-                    SetParticleType(x, y, ParticleType.FLUID);
-                else
-                    SetParticleType(x, y, ParticleType.EMPTY);
-            }
-        }
+        return IsOutOfBounds(x, y) ? ParticleType.SOLID : nodes[GetAddress(x, y)];
     }
 
     public void Init(Texture2D texture)
@@ -72,6 +70,10 @@ public class FluidField
                     SetParticleType(x, y, ParticleType.SOLID);
                 else if (color.DistanceTo(Color.blue) < 0.1f)
                     SetParticleType(x, y, ParticleType.FLUID);
+                else if (color.DistanceTo(Color.green) < 0.1f)
+                    sourceNodes.Add(GetAddress(x, y));
+                else if (color.DistanceTo(Color.red) < 0.1f)
+                    sinkNodes.Add(GetAddress(x, y));
                 else
                     SetParticleType(x, y, ParticleType.EMPTY);
             }
@@ -97,28 +99,24 @@ public class FluidField
         SetParticleType(x1, y1, ParticleType.EMPTY);
     }
 
+    private void SetParticleType(int i, int type)
+    {
+        nodes[i] = type;
+        changedNodes.Add(i);
+    }
+
     private void SetParticleType(int x, int y, int type)
     {
-        particleField[GetAddress(x, y)] = type;
+        SetParticleType(GetAddress(x, y), type);
     }
 
     public void Step()
     {
-        List<Vector2Int> movePriorities = new List<Vector2Int>
-        {
-            new Vector2Int(0,-1),
-            new Vector2Int(1,-1),
-            new Vector2Int(-1,-1),
-            new Vector2Int(1,0),
-            new Vector2Int(-1,0),
-        };
-
         for (int y = 0; y < height; ++y)
         {
             for (int x = reverseStep ? width - 1 : 0; reverseStep ? x >= 0 : x < width; x += reverseStep ? -1 : 1)
             {
                 int p = GetParticleType(x, y);
-                int c = Constants.FlowMultiplier;
 
                 if (p == ParticleType.EMPTY || p == ParticleType.SOLID)
                     continue;
@@ -143,8 +141,13 @@ public class FluidField
                     {
                         int i = 1;
 
-                        while (i < Constants.FlowMultiplier && IsEmpty(x + sign * (i + 1), y))
+                        while (i < Constants.FlowMultiplier)    // search up to FlowMultiplier spaces in either direction
+                        {
+                            if (!IsEmpty(x + sign * (i + 1), y) || IsEmpty(x + sign * (i + 1), y - 1))
+                                break;  // move the particle along the surface until we hit another particle or the particle has an open space below
+
                             ++i;
+                        }
 
                         MoveParticle(x, y, x + sign * i, y);
                     }
@@ -152,14 +155,25 @@ public class FluidField
                     {
                         int i = 1;
 
-                        while (i < Constants.FlowMultiplier && IsEmpty(x - sign * (i + 1), y))
+                        while (i < Constants.FlowMultiplier)
+                        {
+                            if (!IsEmpty(x - sign * (i + 1), y) || IsEmpty(x - sign * (i + 1), y - 1))
+                                break;
+
                             ++i;
+                        }
 
                         MoveParticle(x, y, x - sign * i, y);
                     }
                 }
             }
         }
+
+        foreach (int i in sourceNodes)
+            SetParticleType(i, ParticleType.FLUID);
+
+        foreach (int i in sinkNodes)
+            SetParticleType(i, ParticleType.EMPTY);
 
         reverseStep = !reverseStep;
     }
@@ -175,13 +189,13 @@ public class FluidField
         Vector2Int v;
         Color c;
 
-        foreach (var kv in particleField)
+        foreach (int i in changedNodes)
         {
-            v = GetCoordinate(kv.Key);
+            v = GetCoordinate(i);
 
-            if (kv.Value == ParticleType.SOLID)
+            if (nodes[i] == ParticleType.SOLID)
                 c = Color.black;
-            else if (kv.Value == ParticleType.FLUID)
+            else if (nodes[i] == ParticleType.FLUID)
                 c = Color.blue;
             else
                 c = Color.white;
@@ -190,6 +204,7 @@ public class FluidField
         }
 
         texture.Apply();
+        changedNodes.Clear();
     }
 }
 

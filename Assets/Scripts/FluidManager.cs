@@ -11,11 +11,13 @@ public class FluidManager : MonoBehaviour
 
     private void Start()
     {
-        texture = new Texture2D(100, 100);
+        Texture2D initTexture = Resources.Load<Texture2D>("sprites/ff_init_small");
+        ff = new FluidField(initTexture);
+
+        texture = new Texture2D(initTexture.width, initTexture.height);
         texture.filterMode = FilterMode.Point;
-        ff = new FluidField(texture.width, texture.height);
+
         GetComponent<SpriteRenderer>().sprite = Sprite.Create(texture, new Rect(0, 0, texture.width, texture.height), Vector2.zero);
-        ff.Init(Resources.Load<Texture2D>("sprites/ff_init"));
         timer = 0;
     }
 
