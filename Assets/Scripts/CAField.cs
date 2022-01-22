@@ -23,7 +23,7 @@ public class CAField
         nodes = new List<CANode>();
 
         for (int i = 0; i < width * height; ++i)
-            nodes.Add(new CANode(fluidType));
+            nodes.Add(new CANode(i, GetCoordinate(i), fluidType));
 
         changedNodes = new HashSet<int>();
         sourceNodes = new List<int>();
@@ -41,19 +41,70 @@ public class CAField
         sourceNodes.Add(GetAddress(x, y));
     }
 
+    private CANode FindNearestFreeVolumeNodeBelow(int x, int y)
+    {
+        int distance = 0;
+        HashSet<Vector2Int> toBeChecked = new HashSet<Vector2Int>();
+        HashSet<Vector2Int> checkedCoords = new HashSet<Vector2Int>();
+        List<CANode> nearbyFreeVolumeNodes = new List<CANode>();
+        Vector2Int[] neighbours = new Vector2Int[] { Vector2Int.up, Vector2Int.down, Vector2Int.left, Vector2Int.right };
+
+        toBeChecked.Add(new Vector2Int(x, y));
+
+        while (nearbyFreeVolumeNodes.Count == 0)
+        {
+            HashSet<Vector2Int> nextLoopToBeChecked = new HashSet<Vector2Int>();
+
+            foreach (Vector2Int v in toBeChecked)
+            {
+                checkedCoords.Add(v);
+                CANode node = GetNodeAt(v);
+
+                if (node.FreeVolume > 0 && v.y < y)
+                {
+                    nearbyFreeVolumeNodes.Add(node);
+                }
+                else if (node.FreeVolume == 0)
+                {
+                    foreach (Vector2Int n in neighbours)
+                    {
+                        Vector2Int vn = v + n;
+
+                        if (!IsOutOfBounds(vn) && GetNodeAt(vn).Type == fluidType
+                            && !checkedCoords.Contains(vn))
+                            nextLoopToBeChecked.Add(vn);
+                    }
+                }
+            }
+
+            toBeChecked = nextLoopToBeChecked;
+            ++distance;
+
+            if (toBeChecked.Count == 0 && nearbyFreeVolumeNodes.Count == 0)
+                return null;
+        }
+
+        return (from n in nearbyFreeVolumeNodes orderby n.Fluid select n).First();
+    }
+
     private int GetAddress(int x, int y)
     {
         return y * width + x;
     }
 
-    private Vector2Int GetCoordinate(int i)
+    public Vector2Int GetCoordinate(int i)
     {
         return new Vector2Int(i % width, i / width);
     }
 
-    private CANode GetNode(int x, int y)
+    private CANode GetNodeAt(int x, int y)
     {
         return IsOutOfBounds(x, y) ? null : nodes[GetAddress(x, y)];
+    }
+
+    private CANode GetNodeAt(Vector2Int v)
+    {
+        return GetNodeAt(v.x, v.y);
     }
 
     public void Init(Texture2D texture)
@@ -73,12 +124,12 @@ public class CAField
 
                 if (color.DistanceTo(Color.black) < 0.1f)
                 {
-                    nodes[i] = new CANode(solidType);
+                    nodes[i] = new CANode(i, GetCoordinate(i), solidType);
                 }
                 else if (color.DistanceTo(Color.blue) < 0.1f)
                 {
-                    nodes[i] = new CANode(fluidType);
-                    nodes[i].Fluid = 10;
+                    nodes[i] = new CANode(i, GetCoordinate(i), fluidType);
+                    nodes[i].Fluid = CANode.MaxCapacity;
                 }
                 else if (color.DistanceTo(Color.green) < 0.1f)
                 {
@@ -90,7 +141,7 @@ public class CAField
                 }
                 else
                 {
-                    nodes[i] = new CANode(fluidType);
+                    nodes[i] = new CANode(i, GetCoordinate(i), fluidType);
                 }
             }
         }
@@ -98,7 +149,7 @@ public class CAField
 
     private bool IsEmpty(int x, int y)
     {
-        return GetNode(x, y).Fluid == 0;
+        return GetNodeAt(x, y).Fluid == 0;
     }
 
     private bool IsOutOfBounds(int x, int y)
@@ -106,16 +157,25 @@ public class CAField
         return x < 0 || x >= width || y < 0 || y >= height;
     }
 
-    private void MoveFluid(CANode source, CANode dest, int volume = 10) // default: move as much fluid as possible
+    private bool IsOutOfBounds(Vector2Int v)
     {
-        if (volume <= 0)
-            return;
+        return IsOutOfBounds(v.x, v.y);
+    }
 
-        int[] volumes = new int[] { source.Fluid, dest.FreeVolume, volume };
-        volume = Mathf.Min(volumes);
+    private void MoveFluid(CANode source, CANode dest, int volume = 0)
+    {
+        if (volume < 0)
+            return;
+        else if (volume == 0)
+            volume = source.Fluid;  // if no volume specified, attempt to move all of it
+
+        volume = Mathf.Min(new int[] { source.Fluid, dest.FreeVolume, volume });
 
         source.Fluid -= volume;
         dest.Fluid += volume;
+
+        changedNodes.Add(source.Address);
+        changedNodes.Add(dest.Address);
     }
 
     public void Step()
@@ -129,7 +189,7 @@ public class CAField
         // Update sources and sinks
 
         foreach (int i in sourceNodes)
-            nodes[i].Fluid = 10;
+            nodes[i].Fluid = CANode.MaxCapacity;
 
         foreach (int i in sinkNodes)
             nodes[i].Fluid = 0;
@@ -139,35 +199,39 @@ public class CAField
 
     private void StepNode(int x, int y)
     {
-        CANode thisNode = GetNode(x, y);
+        CANode thisNode = GetNodeAt(x, y);
         CAType p = thisNode.Type;
 
         if (p.PhysicsType == CAPhysicsType.NONE || thisNode.Fluid == 0)
             return;
 
-        CANode downNode = GetNode(x, y - 1);
-        CANode leftNode = GetNode(x - 1, y);
-        CANode rightNode = GetNode(x + 1, y);
+        CANode downNode = GetNodeAt(x, y - 1);
+        CANode leftNode = GetNodeAt(x - 1, y);
+        CANode rightNode = GetNodeAt(x + 1, y);
 
-        if (downNode != null && downNode.FreeVolume > 0)
+        if (downNode != null)
         {
-            MoveFluid(thisNode, downNode);
-            changedNodes.Add(GetAddress(x, y));
-            changedNodes.Add(GetAddress(x, y - 1));
+            if (downNode.FreeVolume > 0)
+            {
+                MoveFluid(thisNode, downNode);
+            }
+            else
+            {
+                CANode nearestNonfilledNodeBelow = FindNearestFreeVolumeNodeBelow(x, y);
+
+                if (nearestNonfilledNodeBelow != null)
+                    MoveFluid(thisNode, nearestNonfilledNodeBelow);
+            }
         }
 
         if (leftNode != null && thisNode.Fluid > leftNode.Fluid)
         {
-            MoveFluid(thisNode, leftNode, Mathf.Max((thisNode.Fluid - leftNode.Fluid) / 2 + 1, 1));
-            changedNodes.Add(GetAddress(x, y));
-            changedNodes.Add(GetAddress(x - 1, y));
+            MoveFluid(thisNode, leftNode, (thisNode.Fluid - leftNode.Fluid) / 2 + 1);
         }
 
         if (rightNode != null && thisNode.Fluid > rightNode.Fluid)
         {
-            MoveFluid(thisNode, rightNode, Mathf.Max((thisNode.Fluid - rightNode.Fluid) / 2 + 1, 1));
-            changedNodes.Add(GetAddress(x, y));
-            changedNodes.Add(GetAddress(x + 1, y));
+            MoveFluid(thisNode, rightNode, (thisNode.Fluid - rightNode.Fluid) / 2 + 1);
         }
     }
 
@@ -192,7 +256,7 @@ public class CAField
             if (nodes[i].Type == solidType)
                 c = Color.grey;
             else if (nodes[i].Type == fluidType && nodes[i].Fluid > 0)
-                c = new Color(Mathf.Lerp(0f, 1f, nodes[i].FreeVolume / 10f), Mathf.Lerp(0f, 1f, nodes[i].FreeVolume / 10f), 1);
+                c = new Color(0, 0, Mathf.Lerp(1f, 0.2f, nodes[i].Fluid / CANode.MaxCapacity));
             else
                 c = Color.white;
 
@@ -206,6 +270,8 @@ public class CAField
 
 public class CANode
 {
+    public int Address { get; private set; }
+    public Vector2Int Coordinate { get; private set; }
     private CAType _type;
 
     public CAType Type
@@ -221,16 +287,19 @@ public class CANode
             if (_type.PhysicsType == CAPhysicsType.NONE)
                 capacity = 0;
             else
-                capacity = 10;
+                capacity = MaxCapacity;
         }
     }
 
     public int Fluid;
     private int capacity;
     public int FreeVolume { get => capacity - Fluid; }
+    public static readonly int MaxCapacity = 10;
 
-    public CANode(CAType type)
+    public CANode(int address, Vector2Int coord, CAType type)
     {
+        Address = address;
+        Coordinate = coord;
         Type = type;
         Fluid = 0;
     }
