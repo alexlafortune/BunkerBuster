@@ -118,7 +118,7 @@ public class CAField
         else if (volume == 0)
             volume = source.Fluid;  // if no volume specified, attempt to move all of it
 
-        volume = Mathf.Min(new float[] { source.Fluid, dest.FreeVolume, volume });
+        volume = Mathf.Min(new float[] { source.Fluid, volume });
 
         source.Fluid -= volume;
         dest.Fluid += volume;
@@ -129,11 +129,13 @@ public class CAField
 
     public void Step()
     {
+        float[] resultFluidLevels = (from n in nodes select n.Fluid).ToArray();
+
         // Update CA nodes
 
         for (int y = 0; y < height; ++y)
             for (int x = reverseStep ? width - 1 : 0; reverseStep ? x >= 0 : x < width; x += reverseStep ? -1 : 1)
-                StepNode(x, y);
+                StepNode(x, y, resultFluidLevels);
 
         // Update sources and sinks
 
@@ -143,10 +145,13 @@ public class CAField
         foreach (int i in sinkNodes)
             nodes[i].Fluid = 0;
 
+        /*for (int i = 0; i < nodes.Count; ++i)
+            nodes[i].Fluid = resultFluidLevels[i];*/
+
         reverseStep = !reverseStep;
     }
 
-    private void StepNode(int x, int y)
+    private void StepNode(int x, int y, float[] resultArray)
     {
         CANode thisNode = GetNodeAt(x, y);
         CAType p = thisNode.Type;
@@ -159,28 +164,60 @@ public class CAField
         CANode leftNode = GetNodeAt(x - 1, y);
         CANode rightNode = GetNodeAt(x + 1, y);
 
-        if (downNode != null)
+        if (downNode != null && downNode.Type == fluidType)
         {
-            MoveFluid(thisNode, downNode, IdealFluidLevel(thisNode.Fluid + downNode.Fluid) - downNode.Fluid);
+            if (downNode.FreeVolume > 0)
+            {
+                float flow = downNode.FreeVolume + CANode.MaxPressure;
+                //resultArray[thisNode.Address] -= downNode.FreeVolume;
+                //resultArray[downNode.Address] += downNode.FreeVolume;
+                MoveFluid(thisNode, downNode, flow);
+            }
+            else if (thisNode.Fluid + CANode.MaxPressure > downNode.Fluid)
+            {
+                float flow = (thisNode.Fluid - downNode.Fluid + CANode.MaxPressure) / 2;
+                //float flow = VerticalFlow(thisNode.Fluid + downNode.Fluid) - downNode.Fluid;
+                //resultArray[thisNode.Address] -= flow;
+                //resultArray[downNode.Address] += flow;
+                MoveFluid(thisNode, downNode, flow);
+            }
         }
 
-        if (leftNode != null && thisNode.Fluid > leftNode.Fluid)
+        CANode sideNode = reverseStep ? rightNode : leftNode;
+
+        if (sideNode != null && sideNode.Type == fluidType && thisNode.Fluid > sideNode.Fluid)
         {
-            MoveFluid(thisNode, leftNode, (thisNode.Fluid - leftNode.Fluid) / 2);
+            /*float flow = (thisNode.Fluid - rightNode.Fluid) / 2;
+            resultArray[thisNode.Address] -= flow;
+            resultArray[rightNode.Address] += flow;*/
+            MoveFluid(thisNode, sideNode, (thisNode.Fluid - sideNode.Fluid) / 2);
         }
 
-        if (rightNode != null && thisNode.Fluid > rightNode.Fluid)
+        sideNode = reverseStep ? leftNode : rightNode;
+
+        if (sideNode != null && sideNode.Type == fluidType && thisNode.Fluid > sideNode.Fluid)
         {
-            MoveFluid(thisNode, rightNode, (thisNode.Fluid - rightNode.Fluid) / 2);
+            /*float flow = (thisNode.Fluid - rightNode.Fluid) / 2;
+            resultArray[thisNode.Address] -= flow;
+            resultArray[rightNode.Address] += flow;*/
+            MoveFluid(thisNode, sideNode, (thisNode.Fluid - sideNode.Fluid) / 2);
         }
 
-        if (upNode != null && thisNode.FreeVolume < 0)
+        if (upNode != null && upNode.Type == fluidType && thisNode.FreeVolume < 0)
         {
-            MoveFluid(thisNode, upNode, IdealFluidLevel(thisNode.Fluid + upNode.Fluid));
+            /*if (upNode.FreeVolume > 0)
+                MoveFluid(thisNode, upNode, -thisNode.FreeVolume);
+            else */
+            if (thisNode.Fluid - CANode.MaxPressure > upNode.Fluid)
+                MoveFluid(thisNode, upNode, thisNode.Fluid - upNode.FreeVolume - CANode.MaxPressure);
+            /*float flow = VerticalFlow(thisNode.Fluid + upNode.Fluid);
+            resultArray[thisNode.Address] -= flow;
+            resultArray[upNode.Address] += flow;*/
+            //MoveFluid(thisNode, upNode, VerticalFlow(thisNode.Fluid + upNode.Fluid));
         }
     }
 
-    public float IdealFluidLevel(float total)
+    public float VerticalFlow(float total)
     {
         if (total <= CANode.MaxCapacity)
             return CANode.MaxCapacity;
@@ -211,7 +248,7 @@ public class CAField
             if (nodes[i].Type == solidType)
                 c = Color.grey;
             else if (nodes[i].Type == fluidType && nodes[i].Fluid > 0)
-                c = new Color(0, 0, Mathf.Lerp(1f, 0.2f, nodes[i].Fluid / CANode.MaxCapacity));
+                c = new Color(nodes[i].Fluid - CANode.MaxCapacity, 0, Mathf.Lerp(1f, 0.1f, nodes[i].Fluid / CANode.MaxCapacity));
             else
                 c = Color.white;
 
@@ -250,7 +287,7 @@ public class CANode
     private float capacity;
     public float FreeVolume { get => capacity - Fluid; }
     public static readonly float MaxCapacity = 1;
-    public static readonly float MaxPressure = 0.1f;
+    public static readonly float MaxPressure = 0.02f;
 
     public CANode(int address, Vector2Int coord, CAType type)
     {
