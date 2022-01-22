@@ -13,7 +13,7 @@ public class CAManager : MonoBehaviour
 
     private void Start()
     {
-        Texture2D initTexture = Resources.Load<Texture2D>("sprites/ff_init");
+        Texture2D initTexture = Resources.Load<Texture2D>("sprites/ff_init_tiny");
         ff = new CAField(initTexture);
 
         texture = new Texture2D(initTexture.width, initTexture.height);
