@@ -1,29 +1,29 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using System.Linq;
 
 public class CAField
 {
     private int width;
     private int height;
-    private List<CAType> nodes;
+    private List<CANode> nodes;
     private HashSet<int> changedNodes;
     private List<int> sourceNodes, sinkNodes;
     private bool reverseStep;   // step in both directions to avoid biasing one direction
-    private CAType emptyNode, solidNode, fluidNode;
+    private CAType solidType, fluidType;
 
     public CAField(int width, int height)
     {
-        emptyNode = new CAType(CAPhysicsType.NONE);
-        solidNode = new CAType(CAPhysicsType.NONE);
-        fluidNode = new CAType(CAPhysicsType.FLOW);
+        solidType = new CAType(CAPhysicsType.NONE);
+        fluidType = new CAType(CAPhysicsType.FLOW);
 
         this.width = width;
         this.height = height;
-        nodes = new List<CAType>();
+        nodes = new List<CANode>();
 
         for (int i = 0; i < width * height; ++i)
-            nodes.Add(emptyNode);
+            nodes.Add(new CANode(fluidType));
 
         changedNodes = new HashSet<int>();
         sourceNodes = new List<int>();
@@ -51,9 +51,9 @@ public class CAField
         return new Vector2Int(i % width, i / width);
     }
 
-    private CAType GetNodeType(int x, int y)
+    private CANode GetNode(int x, int y)
     {
-        return IsOutOfBounds(x, y) ? solidNode : nodes[GetAddress(x, y)];
+        return IsOutOfBounds(x, y) ? null : nodes[GetAddress(x, y)];
     }
 
     public void Init(Texture2D texture)
@@ -69,117 +69,106 @@ public class CAField
             for (int y = 0; y < height; ++y)
             {
                 Color color = texture.GetPixel(x, y);
+                int i = GetAddress(x, y);
 
                 if (color.DistanceTo(Color.black) < 0.1f)
-                    SetNodeType(x, y, solidNode);
+                {
+                    nodes[i] = new CANode(solidType);
+                }
                 else if (color.DistanceTo(Color.blue) < 0.1f)
-                    SetNodeType(x, y, fluidNode);
+                {
+                    nodes[i] = new CANode(fluidType);
+                    nodes[i].Fluid = 10;
+                }
                 else if (color.DistanceTo(Color.green) < 0.1f)
+                {
                     sourceNodes.Add(GetAddress(x, y));
+                }
                 else if (color.DistanceTo(Color.red) < 0.1f)
+                {
                     sinkNodes.Add(GetAddress(x, y));
+                }
                 else
-                    SetNodeType(x, y, emptyNode);
+                {
+                    nodes[i] = new CANode(fluidType);
+                }
             }
         }
     }
 
     private bool IsEmpty(int x, int y)
     {
-        return GetNodeType(x, y) == emptyNode;
+        return GetNode(x, y).Fluid == 0;
     }
 
     private bool IsOutOfBounds(int x, int y)
     {
-        return x < 0 || x > width || y < 0 || y > height;
+        return x < 0 || x >= width || y < 0 || y >= height;
     }
 
-    private void MoveNode(int x1, int y1, int x2, int y2)
+    private void MoveFluid(CANode source, CANode dest, int volume = 10) // default: move as much fluid as possible
     {
-        if (IsEmpty(x1, y1) || !IsEmpty(x2, y2))
+        if (volume <= 0)
             return;
 
-        SetNodeType(x2, y2, GetNodeType(x1, y1));
-        SetNodeType(x1, y1, emptyNode);
-    }
+        int[] volumes = new int[] { source.Fluid, dest.FreeVolume, volume };
+        volume = Mathf.Min(volumes);
 
-    private void SetNodeType(int i, CAType type)
-    {
-        nodes[i] = type;
-        changedNodes.Add(i);
-    }
-
-    private void SetNodeType(int x, int y, CAType type)
-    {
-        SetNodeType(GetAddress(x, y), type);
+        source.Fluid -= volume;
+        dest.Fluid += volume;
     }
 
     public void Step()
     {
+        // Update CA nodes
+
         for (int y = 0; y < height; ++y)
-        {
             for (int x = reverseStep ? width - 1 : 0; reverseStep ? x >= 0 : x < width; x += reverseStep ? -1 : 1)
-            {
-                CAType p = GetNodeType(x, y);
+                StepNode(x, y);
 
-                if (p.PhysicsType == CAPhysicsType.NONE)
-                    continue;
-
-                if (IsEmpty(x, y - 1))
-                {
-                    MoveNode(x, y, x, y - 1);
-                }
-                else
-                {
-                    int sign = Utils.RandomFloat() < 0.5f ? 1 : -1;
-
-                    if (IsEmpty(x + sign, y - 1))
-                    {
-                        MoveNode(x, y, x + sign, y - 1);
-                    }
-                    else if (IsEmpty(x - sign, y - 1))
-                    {
-                        MoveNode(x, y, x - sign, y - 1);
-                    }
-                    else if (IsEmpty(x + sign, y))
-                    {
-                        int i = 1;
-
-                        while (i < Constants.FlowMultiplier)    // search up to FlowMultiplier spaces in either direction
-                        {
-                            if (!IsEmpty(x + sign * (i + 1), y) || IsEmpty(x + sign * (i + 1), y - 1))
-                                break;  // move the particle along the surface until we hit another particle or the particle has an open space below
-
-                            ++i;
-                        }
-
-                        MoveNode(x, y, x + sign * i, y);
-                    }
-                    else if (IsEmpty(x - sign, y))
-                    {
-                        int i = 1;
-
-                        while (i < Constants.FlowMultiplier)
-                        {
-                            if (!IsEmpty(x - sign * (i + 1), y) || IsEmpty(x - sign * (i + 1), y - 1))
-                                break;
-
-                            ++i;
-                        }
-
-                        MoveNode(x, y, x - sign * i, y);
-                    }
-                }
-            }
-        }
+        // Update sources and sinks
 
         foreach (int i in sourceNodes)
-            SetNodeType(i, fluidNode);
+            nodes[i].Fluid = 10;
 
         foreach (int i in sinkNodes)
-            SetNodeType(i, emptyNode);
+            nodes[i].Fluid = 0;
 
         reverseStep = !reverseStep;
+    }
+
+    private void StepNode(int x, int y)
+    {
+        CANode thisNode = GetNode(x, y);
+        CAType p = thisNode.Type;
+
+        if (p.PhysicsType == CAPhysicsType.NONE || thisNode.Fluid == 0)
+            return;
+
+        CANode downNode = GetNode(x, y - 1);
+        CANode leftNode = GetNode(x - 1, y);
+        CANode rightNode = GetNode(x + 1, y);
+
+        if (downNode != null && downNode.FreeVolume > 0)
+        {
+            MoveFluid(thisNode, downNode);
+            changedNodes.Add(GetAddress(x, y));
+            changedNodes.Add(GetAddress(x, y - 1));
+        }
+
+        if (leftNode != null && thisNode.Fluid > leftNode.Fluid)
+        {
+            MoveFluid(thisNode, leftNode, Mathf.Max((thisNode.Fluid - leftNode.Fluid) / 2 + 1, 1));
+            changedNodes.Add(GetAddress(x, y));
+            changedNodes.Add(GetAddress(x - 1, y));
+        }
+
+        if (rightNode != null && thisNode.Fluid > rightNode.Fluid)
+        {
+            MoveFluid(thisNode, rightNode, Mathf.Max((thisNode.Fluid - rightNode.Fluid) / 2 + 1, 1));
+            changedNodes.Add(GetAddress(x, y));
+            changedNodes.Add(GetAddress(x + 1, y));
+        }
     }
 
     public void WriteTexture(Texture2D texture)
@@ -193,14 +182,17 @@ public class CAField
         Vector2Int v;
         Color c;
 
+        for (int i = 0; i < nodes.Count; ++i)
+            changedNodes.Add(i);
+
         foreach (int i in changedNodes)
         {
             v = GetCoordinate(i);
 
-            if (nodes[i] == solidNode)
-                c = Color.black;
-            else if (nodes[i] == fluidNode)
-                c = Color.blue;
+            if (nodes[i].Type == solidType)
+                c = Color.grey;
+            else if (nodes[i].Type == fluidType && nodes[i].Fluid > 0)
+                c = new Color(Mathf.Lerp(0f, 1f, nodes[i].FreeVolume / 10f), Mathf.Lerp(0f, 1f, nodes[i].FreeVolume / 10f), 1);
             else
                 c = Color.white;
 
@@ -209,6 +201,38 @@ public class CAField
 
         texture.Apply();
         changedNodes.Clear();
+    }
+}
+
+public class CANode
+{
+    private CAType _type;
+
+    public CAType Type
+    {
+        get
+        {
+            return _type;
+        }
+        set
+        {
+            _type = value;
+
+            if (_type.PhysicsType == CAPhysicsType.NONE)
+                capacity = 0;
+            else
+                capacity = 10;
+        }
+    }
+
+    public int Fluid;
+    private int capacity;
+    public int FreeVolume { get => capacity - Fluid; }
+
+    public CANode(CAType type)
+    {
+        Type = type;
+        Fluid = 0;
     }
 }
 
