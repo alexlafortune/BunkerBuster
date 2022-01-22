@@ -13,7 +13,7 @@ public class CAManager : MonoBehaviour
 
     private void Start()
     {
-        Texture2D initTexture = Resources.Load<Texture2D>("sprites/ff_init_small");
+        Texture2D initTexture = Resources.Load<Texture2D>("sprites/ff_init");
         ff = new CAField(initTexture);
 
         texture = new Texture2D(initTexture.width, initTexture.height);
@@ -27,7 +27,8 @@ public class CAManager : MonoBehaviour
     private void Update()
     {
         //if (Input.GetKeyDown(KeyCode.S))
-        if (timer > 0f)
+        if (true)
+        //if (timer > 0.2f)
         {
             ff.Step();
             ff.WriteTexture(texture);
@@ -35,8 +36,8 @@ public class CAManager : MonoBehaviour
             ++step;
             text.text = step.ToString();
 
-            if (step > 10)
-                UnityEditor.EditorApplication.isPlaying = false;
+            /*if (step > 10)
+                UnityEditor.EditorApplication.isPlaying = false;*/
         }
 
         timer += Time.deltaTime;

@@ -43,6 +43,9 @@ public class CAField
 
     private CANode FindNearestFreeVolumeNodeBelow(int x, int y)
     {
+        if (GetNodeAt(x, y).NoCalc)
+            return null;
+
         int distance = 0;
         HashSet<Vector2Int> toBeChecked = new HashSet<Vector2Int>();
         HashSet<Vector2Int> checkedCoords = new HashSet<Vector2Int>();
@@ -71,7 +74,9 @@ public class CAField
                         Vector2Int vn = v + n;
 
                         if (!IsOutOfBounds(vn) && GetNodeAt(vn).Type == fluidType
-                            && !checkedCoords.Contains(vn))
+                            && !GetNodeAt(vn).NoCalc
+                            && !checkedCoords.Contains(vn)
+                            && vn.y <= y)
                             nextLoopToBeChecked.Add(vn);
                     }
                 }
@@ -81,7 +86,10 @@ public class CAField
             ++distance;
 
             if (toBeChecked.Count == 0 && nearbyFreeVolumeNodes.Count == 0)
+            {
+                GetNodeAt(x, y).NoCalc = true;
                 return null;
+            }
         }
 
         return (from n in nearbyFreeVolumeNodes orderby n.Fluid select n).First();
@@ -147,11 +155,6 @@ public class CAField
         }
     }
 
-    private bool IsEmpty(int x, int y)
-    {
-        return GetNodeAt(x, y).Fluid == 0;
-    }
-
     private bool IsOutOfBounds(int x, int y)
     {
         return x < 0 || x >= width || y < 0 || y >= height;
@@ -176,11 +179,18 @@ public class CAField
 
         changedNodes.Add(source.Address);
         changedNodes.Add(dest.Address);
+        source.NoCalc = false;
+        source.Settled = false;
+        dest.NoCalc = false;
+        dest.Settled = false;
     }
 
     public void Step()
     {
         // Update CA nodes
+
+        foreach (CANode node in nodes)
+            node.NoCalc = false;
 
         for (int y = 0; y < height; ++y)
             for (int x = reverseStep ? width - 1 : 0; reverseStep ? x >= 0 : x < width; x += reverseStep ? -1 : 1)
@@ -202,8 +212,10 @@ public class CAField
         CANode thisNode = GetNodeAt(x, y);
         CAType p = thisNode.Type;
 
-        if (p.PhysicsType == CAPhysicsType.NONE || thisNode.Fluid == 0)
+        if (p.PhysicsType == CAPhysicsType.NONE || thisNode.Fluid == 0 || thisNode.Settled)
             return;
+
+        int lastFluid = thisNode.Fluid;
 
         CANode downNode = GetNodeAt(x, y - 1);
         CANode leftNode = GetNodeAt(x - 1, y);
@@ -233,6 +245,9 @@ public class CAField
         {
             MoveFluid(thisNode, rightNode, (thisNode.Fluid - rightNode.Fluid) / 2 + 1);
         }
+
+        if (thisNode.Fluid == lastFluid)
+            thisNode.Settled = true;
     }
 
     public void WriteTexture(Texture2D texture)
@@ -255,6 +270,8 @@ public class CAField
 
             if (nodes[i].Type == solidType)
                 c = Color.grey;
+            else if (nodes[i].NoCalc)
+                c = Color.red;
             else if (nodes[i].Type == fluidType && nodes[i].Fluid > 0)
                 c = new Color(0, 0, Mathf.Lerp(1f, 0.2f, nodes[i].Fluid / CANode.MaxCapacity));
             else
@@ -295,6 +312,8 @@ public class CANode
     private int capacity;
     public int FreeVolume { get => capacity - Fluid; }
     public static readonly int MaxCapacity = 10;
+    public bool Settled;
+    public bool NoCalc;
 
     public CANode(int address, Vector2Int coord, CAType type)
     {
@@ -302,6 +321,8 @@ public class CANode
         Coordinate = coord;
         Type = type;
         Fluid = 0;
+        Settled = false;
+        NoCalc = false;
     }
 }
 
