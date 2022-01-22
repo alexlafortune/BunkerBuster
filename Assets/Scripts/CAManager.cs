@@ -13,7 +13,7 @@ public class CAManager : MonoBehaviour
 
     private void Start()
     {
-        Texture2D initTexture = Resources.Load<Texture2D>("sprites/ff_init_small");
+        Texture2D initTexture = Resources.Load<Texture2D>("sprites/ff_init");
         ff = new CAField(initTexture);
 
         texture = new Texture2D(initTexture.width, initTexture.height);
@@ -27,8 +27,8 @@ public class CAManager : MonoBehaviour
     private void Update()
     {
         //if (Input.GetKeyDown(KeyCode.S))
-        //if (true)
-        if (timer > 0.1f)
+        if (true)
+        //if (timer > 0.1f)
         {
             ff.Step();
             ff.WriteTexture(texture);

@@ -29,6 +29,9 @@ public class CAField
         sourceNodes = new List<int>();
         sinkNodes = new List<int>();
         reverseStep = false;
+
+        for (int i = 0; i < nodes.Count; ++i)   // ensure full refresh on first iteration
+            changedNodes.Add(i);
     }
 
     public CAField(Texture2D texture) : this(texture.width, texture.height)
@@ -54,11 +57,6 @@ public class CAField
     private CANode GetNodeAt(int x, int y)
     {
         return IsOutOfBounds(x, y) ? null : nodes[GetAddress(x, y)];
-    }
-
-    private CANode GetNodeAt(Vector2Int v)
-    {
-        return GetNodeAt(v.x, v.y);
     }
 
     public void Init(Texture2D texture)
@@ -106,17 +104,10 @@ public class CAField
         return x < 0 || x >= width || y < 0 || y >= height;
     }
 
-    private bool IsOutOfBounds(Vector2Int v)
-    {
-        return IsOutOfBounds(v.x, v.y);
-    }
-
-    private void MoveFluid(CANode source, CANode dest, float volume = 0)
+    private void MoveFluid(CANode source, CANode dest, float volume)
     {
         if (volume < 0)
             return;
-        else if (volume == 0)
-            volume = source.Fluid;  // if no volume specified, attempt to move all of it
 
         volume = Mathf.Min(new float[] { source.Fluid, volume });
 
@@ -129,13 +120,11 @@ public class CAField
 
     public void Step()
     {
-        float[] resultFluidLevels = (from n in nodes select n.Fluid).ToArray();
-
         // Update CA nodes
 
         for (int y = 0; y < height; ++y)
             for (int x = reverseStep ? width - 1 : 0; reverseStep ? x >= 0 : x < width; x += reverseStep ? -1 : 1)
-                StepNode(x, y, resultFluidLevels);
+                StepNode(x, y);
 
         // Update sources and sinks
 
@@ -145,13 +134,10 @@ public class CAField
         foreach (int i in sinkNodes)
             nodes[i].Fluid = 0;
 
-        /*for (int i = 0; i < nodes.Count; ++i)
-            nodes[i].Fluid = resultFluidLevels[i];*/
-
         reverseStep = !reverseStep;
     }
 
-    private void StepNode(int x, int y, float[] resultArray)
+    private void StepNode(int x, int y)
     {
         CANode thisNode = GetNodeAt(x, y);
         CAType p = thisNode.Type;
@@ -163,68 +149,53 @@ public class CAField
         CANode downNode = GetNodeAt(x, y - 1);
         CANode leftNode = GetNodeAt(x - 1, y);
         CANode rightNode = GetNodeAt(x + 1, y);
+        float flow;
+
+        thisNode.LastChange = Vector2.zero;
 
         if (downNode != null && downNode.Type == fluidType)
         {
             if (downNode.FreeVolume > 0)
             {
-                float flow = downNode.FreeVolume + CANode.MaxPressure;
-                //resultArray[thisNode.Address] -= downNode.FreeVolume;
-                //resultArray[downNode.Address] += downNode.FreeVolume;
+                flow = downNode.FreeVolume + CANode.MaxPressure;
                 MoveFluid(thisNode, downNode, flow);
+                thisNode.LastChange.y -= flow;
+                downNode.LastChange.y += flow;
             }
             else if (thisNode.Fluid + CANode.MaxPressure > downNode.Fluid)
             {
-                float flow = (thisNode.Fluid - downNode.Fluid + CANode.MaxPressure) / 2;
-                //float flow = VerticalFlow(thisNode.Fluid + downNode.Fluid) - downNode.Fluid;
-                //resultArray[thisNode.Address] -= flow;
-                //resultArray[downNode.Address] += flow;
+                flow = (thisNode.Fluid - downNode.Fluid + CANode.MaxPressure) / 2;
                 MoveFluid(thisNode, downNode, flow);
+                thisNode.LastChange.y -= flow;
+                downNode.LastChange.y += flow;
             }
         }
 
         CANode sideNode = reverseStep ? rightNode : leftNode;
 
-        if (sideNode != null && sideNode.Type == fluidType && thisNode.Fluid > sideNode.Fluid)
+        for (int i = 0; i < 2; ++i)
         {
-            /*float flow = (thisNode.Fluid - rightNode.Fluid) / 2;
-            resultArray[thisNode.Address] -= flow;
-            resultArray[rightNode.Address] += flow;*/
-            MoveFluid(thisNode, sideNode, (thisNode.Fluid - sideNode.Fluid) / 2);
-        }
+            if (sideNode != null && sideNode.Type == fluidType && thisNode.Fluid > sideNode.Fluid)
+            {
+                flow = (thisNode.Fluid - sideNode.Fluid) / 2;
+                MoveFluid(thisNode, sideNode, flow);
+                thisNode.LastChange.x -= flow;
+                sideNode.LastChange.x += flow;
+            }
 
-        sideNode = reverseStep ? leftNode : rightNode;
-
-        if (sideNode != null && sideNode.Type == fluidType && thisNode.Fluid > sideNode.Fluid)
-        {
-            /*float flow = (thisNode.Fluid - rightNode.Fluid) / 2;
-            resultArray[thisNode.Address] -= flow;
-            resultArray[rightNode.Address] += flow;*/
-            MoveFluid(thisNode, sideNode, (thisNode.Fluid - sideNode.Fluid) / 2);
+            sideNode = sideNode == leftNode ? rightNode : leftNode; // switch sides
         }
 
         if (upNode != null && upNode.Type == fluidType && thisNode.FreeVolume < 0)
         {
-            /*if (upNode.FreeVolume > 0)
-                MoveFluid(thisNode, upNode, -thisNode.FreeVolume);
-            else */
             if (thisNode.Fluid - CANode.MaxPressure > upNode.Fluid)
-                MoveFluid(thisNode, upNode, thisNode.Fluid - upNode.FreeVolume - CANode.MaxPressure);
-            /*float flow = VerticalFlow(thisNode.Fluid + upNode.Fluid);
-            resultArray[thisNode.Address] -= flow;
-            resultArray[upNode.Address] += flow;*/
-            //MoveFluid(thisNode, upNode, VerticalFlow(thisNode.Fluid + upNode.Fluid));
+            {
+                flow = (thisNode.Fluid - upNode.Fluid - CANode.MaxPressure) / 2;
+                MoveFluid(thisNode, upNode, flow);
+                thisNode.LastChange.y -= flow;
+                upNode.LastChange.y += flow;
+            }
         }
-    }
-
-    public float VerticalFlow(float total)
-    {
-        if (total <= CANode.MaxCapacity)
-            return CANode.MaxCapacity;
-        else if (total < 2 * CANode.MaxCapacity + CANode.MaxPressure)
-            return (CANode.MaxCapacity * CANode.MaxCapacity + total * CANode.MaxPressure) / (CANode.MaxCapacity + CANode.MaxPressure);
-        else
-            return (total + CANode.MaxPressure) / 2;
     }
 
     public void WriteTexture(Texture2D texture)
@@ -237,9 +208,6 @@ public class CAField
 
         Vector2Int v;
         Color c;
-
-        for (int i = 0; i < nodes.Count; ++i)
-            changedNodes.Add(i);
 
         foreach (int i in changedNodes)
         {
@@ -284,10 +252,11 @@ public class CANode
     }
 
     public float Fluid;
+    public Vector2 LastChange;
     private float capacity;
     public float FreeVolume { get => capacity - Fluid; }
     public static readonly float MaxCapacity = 1;
-    public static readonly float MaxPressure = 0.02f;
+    public static readonly float MaxPressure = 0.01f;
 
     public CANode(int address, Vector2Int coord, CAType type)
     {
@@ -295,6 +264,7 @@ public class CANode
         Coordinate = coord;
         Type = type;
         Fluid = 0;
+        LastChange = Vector2.zero;
     }
 }
 
