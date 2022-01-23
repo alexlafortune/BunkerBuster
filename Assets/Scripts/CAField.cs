@@ -5,25 +5,21 @@ using System.Linq;
 
 public class CAField
 {
-    private int width;
-    private int height;
+    public int Width { get; private set; }
+    public int Height { get; private set; }
     private List<CANode> nodes;
     private HashSet<int> changedNodes;
     private List<int> sourceNodes, sinkNodes;
     private bool reverseStep;   // step in both directions to avoid biasing one direction
-    private CAType solidType, fluidType;
 
     public CAField(int width, int height)
     {
-        solidType = new CAType(CAPhysicsType.NONE);
-        fluidType = new CAType(CAPhysicsType.FLOW);
-
-        this.width = width;
-        this.height = height;
+        Width = width;
+        Height = height;
         nodes = new List<CANode>();
 
         for (int i = 0; i < width * height; ++i)
-            nodes.Add(new CANode(i, GetCoordinate(i), fluidType));
+            nodes.Add(new CANode(i, GetCoordinate(i), CAType.Water));
 
         changedNodes = new HashSet<int>();
         sourceNodes = new List<int>();
@@ -39,6 +35,13 @@ public class CAField
         Init(texture);
     }
 
+    public void AddMaterial(int x, int y, CAType type, float fillAmount)
+    {
+        CANode node = GetNodeAt(x, y);
+        node.Type = type;
+        node.Fluid = fillAmount * node.Capacity;
+    }
+
     public void AddSourceNode(int x, int y)
     {
         sourceNodes.Add(GetAddress(x, y));
@@ -46,12 +49,12 @@ public class CAField
 
     private int GetAddress(int x, int y)
     {
-        return y * width + x;
+        return y * Width + x;
     }
 
     public Vector2Int GetCoordinate(int i)
     {
-        return new Vector2Int(i % width, i / width);
+        return new Vector2Int(i % Width, i / Width);
     }
 
     private CANode GetNodeAt(int x, int y)
@@ -61,39 +64,39 @@ public class CAField
 
     public void Init(Texture2D texture)
     {
-        if (texture.width != width || texture.height != height)
+        if (texture.width != Width || texture.height != Height)
         {
             Debug.LogError("Texture-FluidField size mismatch in Init()!");
             return;
         }
 
-        for (int x = 0; x < width; ++x)
+        for (int x = 0; x < Width; ++x)
         {
-            for (int y = 0; y < height; ++y)
+            for (int y = 0; y < Height; ++y)
             {
                 Color color = texture.GetPixel(x, y);
                 int i = GetAddress(x, y);
 
-                if (color.DistanceTo(Color.black) < 0.1f)
+                if (color.ColorDistance(Color.black) < 0.1f)
                 {
-                    nodes[i] = new CANode(i, GetCoordinate(i), solidType);
+                    nodes[i] = new CANode(i, GetCoordinate(i), CAType.Rock);
                 }
-                else if (color.DistanceTo(Color.blue) < 0.1f)
+                else if (color.ColorDistance(Color.blue) < 0.1f)
                 {
-                    nodes[i] = new CANode(i, GetCoordinate(i), fluidType);
-                    nodes[i].Fluid = CANode.MaxCapacity;
+                    nodes[i] = new CANode(i, GetCoordinate(i), CAType.Water);
+                    nodes[i].Fluid = nodes[i].Capacity;
                 }
-                else if (color.DistanceTo(Color.green) < 0.1f)
+                else if (color.ColorDistance(Color.green) < 0.1f)
                 {
                     sourceNodes.Add(GetAddress(x, y));
                 }
-                else if (color.DistanceTo(Color.red) < 0.1f)
+                else if (color.ColorDistance(Color.red) < 0.1f)
                 {
                     sinkNodes.Add(GetAddress(x, y));
                 }
                 else
                 {
-                    nodes[i] = new CANode(i, GetCoordinate(i), fluidType);
+                    nodes[i] = new CANode(i, GetCoordinate(i), CAType.Water);
                 }
             }
         }
@@ -101,13 +104,24 @@ public class CAField
 
     private bool IsOutOfBounds(int x, int y)
     {
-        return x < 0 || x >= width || y < 0 || y >= height;
+        return x < 0 || x >= Width || y < 0 || y >= Height;
+    }
+
+    private bool IsFluid(CANode node)
+    {
+        if (node == null)
+            return false;
+
+        return node.Type == CAType.Water || node.Type == CAType.Empty;
     }
 
     private void MoveFluid(CANode source, CANode dest, float volume)
     {
         if (volume < 0)
             return;
+
+        if (dest.Type == CAType.Empty)
+            dest.Type = CAType.Water;
 
         volume = Mathf.Min(new float[] { source.Fluid, volume });
 
@@ -118,18 +132,34 @@ public class CAField
         changedNodes.Add(dest.Address);
     }
 
+    public void RemoveMaterial(int x, int y)
+    {
+        CANode node = GetNodeAt(x, y);
+
+        if (!IsFluid(node))
+        {
+            node.Type = CAType.Empty;
+            changedNodes.Add(node.Address);
+        }
+    }
+
+    public void RemoveMaterial(Vector2Int v)
+    {
+        RemoveMaterial(v.x, v.y);
+    }
+
     public void Step()
     {
         // Update CA nodes
 
-        for (int y = 0; y < height; ++y)
-            for (int x = reverseStep ? width - 1 : 0; reverseStep ? x >= 0 : x < width; x += reverseStep ? -1 : 1)
+        for (int y = 0; y < Height; ++y)
+            for (int x = reverseStep ? Width - 1 : 0; reverseStep ? x >= 0 : x < Width; x += reverseStep ? -1 : 1)
                 StepNode(x, y);
 
         // Update sources and sinks
 
         foreach (int i in sourceNodes)
-            nodes[i].Fluid = CANode.MaxCapacity;
+            nodes[i].Fluid = nodes[i].Capacity;
 
         foreach (int i in sinkNodes)
             nodes[i].Fluid = 0;
@@ -140,42 +170,54 @@ public class CAField
     private void StepNode(int x, int y)
     {
         CANode thisNode = GetNodeAt(x, y);
-        CAType p = thisNode.Type;
 
-        if (p.PhysicsType == CAPhysicsType.NONE || thisNode.Fluid == 0)
+        if (thisNode.Type == CAType.Empty || thisNode.Type == CAType.Rock)
+        {
             return;
+        }
+        else if (thisNode.Fluid == 0)
+        {
+            thisNode.Type = CAType.Empty;
+            return;
+        }
 
         CANode upNode = GetNodeAt(x, y + 1);
         CANode downNode = GetNodeAt(x, y - 1);
+        CANode leftNode = GetNodeAt(x - 1, y);
+        CANode rightNode = GetNodeAt(x + 1, y);
         float flow;
+        Vector2 momentum = thisNode.Momentum;
+        thisNode.Momentum *= 0.9f;
 
-        if (downNode != null && downNode.Type == fluidType)
+        if (IsFluid(downNode))
         {
             if (downNode.FreeVolume > 0)
             {
                 flow = downNode.FreeVolume + CANode.MaxPressure;
                 MoveFluid(thisNode, downNode, flow);
+                thisNode.Momentum.y -= flow;
             }
             else if (thisNode.Fluid + CANode.MaxPressure > downNode.Fluid)
             {
                 flow = (thisNode.Fluid - downNode.Fluid + CANode.MaxPressure) / 2;
                 MoveFluid(thisNode, downNode, flow);
+                thisNode.Momentum.y -= flow;
             }
         }
 
-        for (int i = -1; i <= 1; i += 2)    // do left side, then right side
+        for (int sign = -1; sign <= 1; sign += 2)    // do left side, then right side
         {
-            CANode sideNode = GetNodeAt(x + i, y);
+            CANode sideNode = sign > 0 ? rightNode : leftNode;
             List<float> fluids = new List<float>();
 
-            if (sideNode == null || sideNode.Type != fluidType)
+            if (!IsFluid(sideNode))
                 continue;
 
-            for (int j = 0; j < 100; ++j)
+            for (int j = 0; j <= 5; ++j)
             {
-                CANode rowNode = GetNodeAt(x + j * i, y);
+                CANode rowNode = GetNodeAt(x + j * sign, y);
 
-                if (rowNode == null || rowNode.Type != fluidType)
+                if (!IsFluid(rowNode))
                     break;
 
                 fluids.Add(rowNode.Fluid);
@@ -186,26 +228,38 @@ public class CAField
 
             float avgFluid = fluids.Average();
 
-            if (sideNode != null && sideNode.Type == fluidType && thisNode.Fluid > avgFluid)
+            if (IsFluid(sideNode) && thisNode.Fluid > avgFluid)
             {
                 flow = (thisNode.Fluid - avgFluid) / 2;
                 MoveFluid(thisNode, sideNode, flow);
+                thisNode.Momentum.x += sign * flow;
             }
         }
 
-        if (upNode != null && upNode.Type == fluidType && thisNode.FreeVolume < 0)
+        if (IsFluid(upNode) && thisNode.FreeVolume < 0)
         {
             if (thisNode.Fluid - CANode.MaxPressure > upNode.Fluid)
             {
                 flow = (thisNode.Fluid - upNode.Fluid - CANode.MaxPressure) / 2;
                 MoveFluid(thisNode, upNode, flow);
+                thisNode.Momentum.y += flow;
             }
         }
+
+        /*if (momentum.x > 0 && rightNode != null)
+            MoveFluid(thisNode, rightNode, momentum.x);
+        if (momentum.x < 0 && leftNode != null)
+            MoveFluid(thisNode, rightNode, momentum.x);*/
+
+        if (momentum.y > 0 && upNode != null)
+            MoveFluid(thisNode, upNode, momentum.y);
+        else if (momentum.y < 0 && downNode != null)
+            MoveFluid(thisNode, downNode, momentum.y);
     }
 
     public void WriteTexture(Texture2D texture)
     {
-        if (texture.width != width || texture.height != height)
+        if (texture.width != Width || texture.height != Height)
         {
             Debug.LogError("Texture-FluidField size mismatch in WriteTexture()!");
             return;
@@ -218,10 +272,10 @@ public class CAField
         {
             v = GetCoordinate(i);
 
-            if (nodes[i].Type == solidType)
+            if (nodes[i].Type == CAType.Rock)
                 c = Color.grey;
-            else if (nodes[i].Type == fluidType && nodes[i].Fluid > 0)
-                c = new Color(nodes[i].Fluid - CANode.MaxCapacity, 0, Mathf.Lerp(1f, 0.1f, nodes[i].Fluid / CANode.MaxCapacity));
+            else if (nodes[i].Type == CAType.Water && nodes[i].Fluid > 0)
+                c = new Color(nodes[i].Fluid - nodes[i].Capacity, 0, 1, Mathf.Lerp(0f, 1f, nodes[i].Fluid / nodes[i].Capacity));
             else
                 c = Color.white;
 
@@ -249,17 +303,20 @@ public class CANode
         {
             _type = value;
 
-            if (_type.PhysicsType == CAPhysicsType.NONE)
-                capacity = 0;
-            else
-                capacity = MaxCapacity;
+            if (_type == CAType.Empty)
+                Capacity = maxCapacity;
+            else if (_type == CAType.Water)
+                Capacity = maxCapacity;
+            else if (_type == CAType.Rock)
+                Capacity = 0;
         }
     }
 
     public float Fluid;
-    private float capacity;
-    public float FreeVolume { get => capacity - Fluid; }
-    public static readonly float MaxCapacity = 1;
+    public float Capacity { get; private set; }
+    public Vector2 Momentum;
+    public float FreeVolume { get => Capacity - Fluid; }
+    private static readonly float maxCapacity = 1;
     public static readonly float MaxPressure = 0.01f;
 
     public CANode(int address, Vector2Int coord, CAType type)
@@ -268,16 +325,27 @@ public class CANode
         Coordinate = coord;
         Type = type;
         Fluid = 0;
+        Momentum = Vector2.zero;
     }
 }
 
 public class CAType
 {
     public int PhysicsType { get; private set; }
+    public static CAType Empty { get; private set; }
+    public static CAType Water { get; private set; }
+    public static CAType Rock { get; private set; }
 
     public CAType(int physicsType)
     {
         PhysicsType = physicsType;
+    }
+
+    public static void InitTypes()
+    {
+        Empty = new CAType(CAPhysicsType.NONE);
+        Water = new CAType(CAPhysicsType.FLOW);
+        Rock = new CAType(CAPhysicsType.NONE);
     }
 }
 

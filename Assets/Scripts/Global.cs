@@ -7,6 +7,11 @@ public static class Utils
 {
     private static System.Random random = new System.Random();
 
+    public static float ColorDistance(this Color color, Color other)
+    {
+        return Mathf.Abs(color.r - other.r) + Mathf.Abs(color.g - other.g) + Mathf.Abs(color.b - other.b);
+    }
+
     public static float Distance(this Vector2 v, Vector2 other)
     {
         return (v - other).magnitude;
@@ -52,8 +57,13 @@ public static class Utils
         return (float)random.NextDouble();
     }
 
-    public static float DistanceTo(this Color color, Color other)
+    public static Vector2Int Round(this Vector2 v)
     {
-        return Mathf.Abs(color.r - other.r) + Mathf.Abs(color.g - other.g) + Mathf.Abs(color.b - other.b);
+        return new Vector2Int(Mathf.RoundToInt(v.x), Mathf.RoundToInt(v.y));
+    }
+
+    public static Vector2Int RoundDown(this Vector2 v)
+    {
+        return new Vector2Int((int)v.x - (v.x < 0 ? 1 : 0), (int)v.y - (v.y < 0 ? 1 : 0));
     }
 }
