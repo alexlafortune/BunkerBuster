@@ -132,6 +132,24 @@ public class CAField
         changedNodes.Add(dest.Address);
     }
 
+    public void ReadShaderNodeArray(CAShaderNode[] arr)
+    {
+        for (int i = 0; i < nodes.Count; ++i)
+        {
+            if (arr[i].type == 0)
+                nodes[i].Type = CAType.Empty;
+            else if (arr[i].type == 1)
+                nodes[i].Type = CAType.Water;
+            else if (arr[i].type == 2)
+                nodes[i].Type = CAType.Rock;
+
+            nodes[i].Fluid = arr[i].fluid;
+            changedNodes.Add(i);
+        }
+
+        int k = 0;
+    }
+
     public void RemoveMaterial(int x, int y)
     {
         CANode node = GetNodeAt(x, y);
@@ -257,6 +275,16 @@ public class CAField
             MoveFluid(thisNode, downNode, momentum.y);
     }
 
+    public CAShaderNode[] ToShaderNodeArray()
+    {
+        CAShaderNode[] arr = new CAShaderNode[nodes.Count];
+
+        for (int i = 0; i < nodes.Count; ++i)
+            arr[i] = new CAShaderNode(nodes[i].Type, nodes[i].Fluid, nodes[i].Capacity);
+
+        return arr;
+    }
+
     public void WriteTexture(Texture2D texture)
     {
         if (texture.width != Width || texture.height != Height)
@@ -275,7 +303,7 @@ public class CAField
             if (nodes[i].Type == CAType.Rock)
                 c = Color.grey;
             else if (nodes[i].Type == CAType.Water && nodes[i].Fluid > 0)
-                c = new Color(nodes[i].Fluid - nodes[i].Capacity, 0, 1, Mathf.Lerp(0f, 1f, nodes[i].Fluid / nodes[i].Capacity));
+                c = new Color(/*nodes[i].Fluid - nodes[i].Capacity*/0, 0, 1, Mathf.Lerp(0f, 1f, nodes[i].Fluid / nodes[i].Capacity));
             else
                 c = Color.white;
 
@@ -327,6 +355,11 @@ public class CANode
         Fluid = 0;
         Momentum = Vector2.zero;
     }
+
+    public override string ToString()
+    {
+        return Coordinate.ToString() + ": " + Fluid + " / " + Capacity;
+    }
 }
 
 public class CAType
@@ -355,4 +388,24 @@ public static class CAPhysicsType
     public static readonly int FALL = 1;
     public static readonly int PILE = 2;
     public static readonly int FLOW = 3;
+}
+
+public struct CAShaderNode
+{
+    public int type;
+    public float fluid;
+    public float capacity;
+
+    public CAShaderNode(CAType type, float fluid, float capacity)
+    {
+        if (type == CAType.Water)
+            this.type = 1;
+        else if (type == CAType.Rock)
+            this.type = 2;
+        else
+            this.type = 0;
+
+        this.fluid = fluid;
+        this.capacity = capacity;
+    }
 }

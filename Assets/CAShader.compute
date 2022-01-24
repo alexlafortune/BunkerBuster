@@ -1,0 +1,75 @@
+#pragma kernel StepNode
+
+#define EMPTY 0
+#define WATER 1
+#define ROCK 2
+
+struct CAShaderNode
+{
+	int type;
+	float fluid;
+	float capacity;
+};
+
+RWStructuredBuffer<CAShaderNode> nodes;
+RWStructuredBuffer<CAShaderNode> nodesResult;
+int width;
+int height;
+
+float Min(float a, float b)
+{
+	return a < b ? a : b;
+}
+
+int GetAddress(int x, int y)
+{
+	return y * width + x;
+}
+
+bool IsFluidType(CAShaderNode node)
+{
+	return node.type == EMPTY || node.type == WATER;
+}
+
+bool IsOutOfBounds(int x, int y)
+{
+	return x < 0 || x >= width || y < 0 || y >= height;
+}
+
+[numthreads(8, 1, 1)]
+void StepNode(uint3 id : SV_DispatchThreadID)
+{
+	int i = id.x;
+	
+	nodesResult[i] = nodes[i];
+	
+	if (nodes[i].type == EMPTY || nodes[i].type == ROCK)
+	{
+		return;
+	}
+	else if (nodes[i].fluid == 0)
+	{
+		nodesResult[i].type = EMPTY;
+		return;
+	}
+	
+	int x = i % width;
+	int y = i / width;
+	float flow;	
+	
+	if (!IsOutOfBounds(x, y - 1))
+	{
+		int down = GetAddress(x, y - 1);
+
+		if (IsFluidType(nodes[down]))
+		{
+			if (nodes[down].fluid < nodes[down].capacity)
+			{
+				flow = Min(nodes[i].fluid, nodes[down].capacity - nodes[down].fluid);
+				nodesResult[i].fluid -= flow;
+				nodesResult[down].type = WATER;
+				nodesResult[down].fluid += flow;
+			}
+		}
+	}
+}
